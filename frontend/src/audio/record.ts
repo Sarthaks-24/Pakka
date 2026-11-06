@@ -5,11 +5,18 @@ export interface Recorder {
 /** Opens the microphone and starts recording. Throws if access is denied. */
 export async function startRecorder(): Promise<Recorder> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  const media = new MediaRecorder(stream)
   const chunks: Blob[] = []
-  media.ondataavailable = (e) => chunks.push(e.data)
-  const startedAt = performance.now()
-  media.start()
+  let media: MediaRecorder
+  let startedAt: number
+  try {
+    media = new MediaRecorder(stream)
+    media.ondataavailable = (e) => chunks.push(e.data)
+    startedAt = performance.now()
+    media.start()
+  } catch (e) {
+    stream.getTracks().forEach((t) => t.stop())
+    throw e
+  }
   return {
     stop: () =>
       new Promise((resolve) => {

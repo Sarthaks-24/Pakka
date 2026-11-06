@@ -13,9 +13,9 @@ export function createApp({ providers = defaultProviders, config = readConfig() 
   app.disable("x-powered-by");
 
   app.use((req, res, next) => {
-    if (req.headers.origin === config.frontendOrigin) {
+    if (config.frontendOrigins.includes(req.headers.origin)) {
       res.set({
-        "Access-Control-Allow-Origin": config.frontendOrigin,
+        "Access-Control-Allow-Origin": req.headers.origin,
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
         Vary: "Origin",
@@ -49,7 +49,8 @@ export function createApp({ providers = defaultProviders, config = readConfig() 
     if (err?.name === "MulterError") return res.status(400).json({ error: "The upload was not accepted. Send one WAV file in the audio field." });
     if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "Request body is not valid JSON. Fix it and send again." });
     if (err?.type === "entity.too.large") return res.status(413).json({ error: "Request body is too large. Shorten it and send again." });
-    console.error("Unhandled error:", err?.message);
+    // The error text can carry upstream details or a key, so only a status and a fixed code are logged.
+    console.error("Unhandled error", { status: 500, code: "UNHANDLED" });
     res.status(500).json({ error: "Something went wrong on the server. Try again, and check the server log if it keeps happening." });
   });
 

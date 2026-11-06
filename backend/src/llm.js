@@ -2,12 +2,13 @@
 import { readFileSync } from "node:fs";
 import { readConfig } from "./config.js";
 import { HttpError } from "./errors.js";
-import { FIELDS, NUMERIC_FIELDS } from "./ledger.js";
+import { FIELDS, NUMERIC_FIELDS, UNITS as CANON_UNITS, validDate } from "./ledger.js";
 
 const SYSTEM_PROMPT = readFileSync(new URL("./prompts/analyse.md", import.meta.url), "utf8");
-const UNITS = new Set(["meter", "roll", "kg", "piece", "than", "dozen", "bale", "lot"]);
+const UNITS = new Set(CANON_UNITS);
 const ENUMS = { unit: UNITS, per: UNITS, currency: new Set(["INR", "USD"]), gst: new Set(["included", "extra"]) };
-const LLM_TYPES = new Set(["A7", "A9", "A10"]);
+const TIMEOUT_MS = 20000;
+const LLM_TYPES =new Set(["A7", "A9", "A10"]);
 
 const str = (nullable = true) => ({ type: "STRING", nullable });
 const num = { type: "NUMBER", nullable: true };
@@ -46,7 +47,7 @@ const RESPONSE_SCHEMA = {
   required: ["translation", "terms", "ambiguities"],
 };
 
-function coerce(field, v) {
+function coerce(field, v, today) {
   if (v == null || v === "") return null;
   if (NUMERIC_FIELDS.has(field)) {
     const n = typeof v === "number" ? v : Number(String(v).replace(/,/g, ""));
@@ -54,6 +55,7 @@ function coerce(field, v) {
   }
   const s = String(v).trim().slice(0, 100);
   if (!s) return null;
+  if (field === "date") return validDate(s, today) ? s : null;
   if (ENUMS[field]) {
     const lower = s.toLowerCase();
     const key = field === "currency" ? s.toUpperCase() : lower;
@@ -63,7 +65,7 @@ function coerce(field, v) {
 }
 
 // Keeps only known slots and fields with valid values.
-export function sanitizeAnalysis(raw) {
+export function sanitizeAnalysis(raw, today = new Date().toISOString().slice(0, 10)) {
   if (!raw || typeof raw.translation !== "string" || !raw.translation.trim()) {
     throw new HttpError(502, "The language model returned no translation. Try the turn again.");
   }
@@ -73,7 +75,7 @@ export function sanitizeAnalysis(raw) {
     if (!given || typeof given !== "object") continue;
     const clean = {};
     for (const f of fields) {
-      const v = coerce(f, given[f]);
+      const v = coerce(f, given[f], today);
       if (v != null) clean[f] = v;
     }
     if (slot === "delivery" && Array.isArray(given.candidates)) {
@@ -86,7 +88,7 @@ export function sanitizeAnalysis(raw) {
     if (!LLM_TYPES.has(a?.type) || !FIELDS[a.slot]) continue;
     const options = [];
     for (const o of Array.isArray(a.options) ? a.options.slice(0, 4) : []) {
-      const value = FIELDS[a.slot].includes(o?.field) ? coerce(o.field, o.value) : null;
+      const value = FIELDS[a.slot].includes(o?.field) ? coerce(o.field, o.value, today) : null;
       const label = typeof o?.label === "string" ? o.label.trim().slice(0, 80) : "";
       if (value != null && label) options.push({ label, patch: { [o.field]: value } });
     }
@@ -112,14 +114,17 @@ export async function analyseTurn({ transcript, speakerLang, listenerLang, ledge
         contents: [{ role: "user", parts: [{ text: JSON.stringify({ today, speakerLang, listenerLang, ledger: brief(ledger), transcript }) }] }],
         generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0 },
       }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-  } catch {
+  } catch (err) {
+    if (err?.name === "TimeoutError") throw new HttpError(504, "Gemini took too long to answer. Try the turn again.");
     throw new HttpError(502, "Could not reach Gemini. Check the internet connection and try again.");
   }
-  if (res.status === 400 || res.status === 403) {
-    throw new HttpError(502, "Gemini rejected the request. Check GEMINI_API_KEY in backend/.env.");
+  if (res.status === 401 || res.status === 403) {
+    throw new HttpError(502, "Gemini rejected the API key. Check GEMINI_API_KEY in backend/.env.");
   }
-  if (res.status === 404) throw new HttpError(502, "Gemini does not know this model. Check GEMINI_MODEL in backend/.env.");
+  if (res.status === 400) throw new HttpError(502, "Gemini could not process that message. Shorten it and try again.");
+  if (res.status === 404) throw new HttpError(502, "The model in GEMINI_MODEL was not found. Check the model name in backend/.env.");
   if (res.status === 429) throw new HttpError(503, "Gemini is rate limited. Wait a moment and try again.");
   if (!res.ok) throw new HttpError(502, "Gemini did not answer. Try again in a moment.");
   let raw;
@@ -129,5 +134,5 @@ export async function analyseTurn({ transcript, speakerLang, listenerLang, ledge
   } catch {
     throw new HttpError(502, "Gemini returned an unreadable answer. Try the turn again.");
   }
-  return sanitizeAnalysis(raw);
+  return sanitizeAnalysis(raw, today);
 }

@@ -33,7 +33,10 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<Where, string>>>({})
   const [card, setCard] = useState<Card | null>(null)
+  const [round, setRound] = useState(0)
   const audio = useRef<HTMLAudioElement | null>(null)
+  // Bumped by New deal so responses to requests started before it are ignored.
+  const requestToken = useRef(0)
 
   const setError = (where: Where, message = '') => setErrors((e) => ({ ...e, [where]: message }))
 
@@ -72,6 +75,7 @@ export default function App() {
     setSession(r.session)
     if (r.outcome === 'clarify' && r.clarification) {
       setClar(r.clarification)
+      setRound((n) => n + 1)
       setPending(r.turn.speaker)
       if (r.clarification.audioUrl) play(r.clarification.audioUrl, true)
     } else {
@@ -81,39 +85,46 @@ export default function App() {
     }
   }
 
-  async function run(where: Where, action: () => Promise<void>): Promise<boolean> {
+  async function run(where: Where, action: (live: () => boolean) => Promise<void>): Promise<boolean> {
+    const token = requestToken.current
+    const live = () => token === requestToken.current
     setBusy(true)
     setErrors({})
     try {
-      await action()
+      await action(live)
       return true
     } catch (e) {
-      setError(where, (e as Error).message)
+      if (live()) setError(where, (e as Error).message)
       return false
     } finally {
-      setBusy(false)
+      if (live()) setBusy(false)
     }
   }
 
   const ensureSession = async () => session ?? (await api.createSession())
 
   const sendTurn = (speaker: Speaker, input: { wav: Blob } | { text: string }) =>
-    run(speaker, async () => {
+    run(speaker, async (live) => {
       const s = await ensureSession()
+      if (!live()) return
       setSession(s)
-      applyResult(await api.sendTurn(s.id, speaker, input))
+      const r = await api.sendTurn(s.id, speaker, input)
+      if (live()) applyResult(r)
     })
 
   const answer = (a: { optionId: string } | { skip: true }) =>
-    run('clarify', async () => {
-      if (session) applyResult(await api.clarify(session.id, a))
+    run('clarify', async (live) => {
+      if (!session) return
+      const r = await api.clarify(session.id, a)
+      if (live()) applyResult(r)
     })
 
   const confirm = () =>
-    run('confirm', async () => {
+    run('confirm', async (live) => {
       if (!session) return
       try {
         const r = await api.confirmDeal(session.id)
+        if (!live()) return
         setSession(r.session)
         setCard(r.card)
       } catch (e) {
@@ -128,7 +139,9 @@ export default function App() {
     })
 
   function newDeal() {
+    requestToken.current += 1
     audio.current?.pause()
+    setBusy(false)
     setSession(null)
     setClar(null)
     setPending(null)
@@ -218,6 +231,7 @@ export default function App() {
 
             {clar && pending && (
               <ClarificationPanel
+                key={round}
                 clarification={clar}
                 speaker={pending}
                 busy={busy}

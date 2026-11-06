@@ -16,6 +16,50 @@ const upload = multer({
 
 const isWav = (b) => b.length > 12 && b.toString("ascii", 0, 4) === "RIFF" && b.toString("ascii", 8, 12) === "WAVE";
 
+const MAX_CLIP_SECONDS = 25.5;
+
+// Clip length from the WAV header, or null when the header cannot be read.
+function wavSeconds(b) {
+  let byteRate = null;
+  for (let pos = 12; pos + 8 <= b.length;) {
+    const id = b.toString("ascii", pos, pos + 4);
+    const size = b.readUInt32LE(pos + 4);
+    if (id === "fmt " && pos + 20 <= b.length) byteRate = b.readUInt32LE(pos + 16);
+    if (id === "data") {
+      // A streamed file can declare a size of 0 or 0xFFFFFFFF, so the real remaining bytes are used then.
+      const bytes = size === 0 || size === 0xffffffff ? b.length - pos - 8 : size;
+      return byteRate ? bytes / byteRate : null;
+    }
+    pos += 8 + size + (size % 2);
+  }
+  return null;
+}
+
+// In-process mutex per session id: requests for one session run one after another, so none reads a stale copy.
+const locks = new Map();
+async function withLock(id, fn) {
+  const prev = locks.get(id) ?? Promise.resolve();
+  let release;
+  const mine = new Promise((r) => { release = r; });
+  const tail = prev.then(() => mine);
+  locks.set(id, tail);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (locks.get(id) === tail) locks.delete(id);
+  }
+}
+
+// Runs a mutating handler under the session lock, on a copy loaded after the lock is held.
+const locked = (handler) => (req, res) =>
+  withLock(req.params.id, async () => {
+    req.deal = await DealSession.findById(req.params.id);
+    if (!req.deal) throw new HttpError(404, "Session not found. Start a new session.");
+    return handler(req, res);
+  });
+
 export function sessionsRouter({ providers, config }) {
   const router = Router();
 
@@ -38,13 +82,16 @@ export function sessionsRouter({ providers, config }) {
 
   router.get("/:id", (req, res) => res.json(req.deal.toJSON()));
 
-  router.post("/:id/turns", upload, async (req, res) => {
+  router.post("/:id/turns", upload, locked(async (req, res) => {
     const body = req.body ?? {};
     if (!SPEAKERS.includes(body.speaker)) throw new HttpError(400, "Speaker must be seller or buyer.");
     let text;
     let audio;
     if (req.file) {
       if (!isWav(req.file.buffer)) throw new HttpError(415, "That file is not a valid WAV recording. Record again or type the message instead.");
+      if (wavSeconds(req.file.buffer) > MAX_CLIP_SECONDS) {
+        throw new HttpError(400, "That recording is longer than 25 seconds. Record a shorter clip and send again.");
+      }
       audio = req.file.buffer;
     } else {
       text = typeof body.text === "string" ? body.text.trim() : "";
@@ -54,9 +101,9 @@ export function sessionsRouter({ providers, config }) {
     const result = await runTurn({ session: req.deal, speaker: body.speaker, text, audio, providers, cfg: config });
     await req.deal.save();
     res.json(result);
-  });
+  }));
 
-  router.post("/:id/clarify", async (req, res) => {
+  router.post("/:id/clarify", locked(async (req, res) => {
     const { optionId, skip } = req.body ?? {};
     if (skip !== true && (typeof optionId !== "string" || !optionId || optionId.length > 64)) {
       throw new HttpError(400, "Send an optionId, or skip: true to leave the question unresolved.");
@@ -64,13 +111,13 @@ export function sessionsRouter({ providers, config }) {
     const result = await answerClarification({ session: req.deal, optionId, skip: skip === true, providers, cfg: config });
     await req.deal.save();
     res.json(result);
-  });
+  }));
 
-  router.post("/:id/confirm", async (req, res) => {
+  router.post("/:id/confirm", locked(async (req, res) => {
     const result = await confirmDeal({ session: req.deal, providers, cfg: config });
     await req.deal.save();
     res.json(result);
-  });
+  }));
 
   return router;
 }

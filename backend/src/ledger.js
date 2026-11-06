@@ -9,7 +9,7 @@ export const FIELDS = {
   payment: ["advancePct", "balance"],
 };
 export const SLOTS = Object.keys(FIELDS);
-export const UNITS = ["meter", "roll", "kg", "piece", "than", "dozen", "bale"];
+export const UNITS = ["meter", "roll", "kg", "piece", "than", "dozen", "bale", "lot"];
 export const NUMERIC_FIELDS = new Set(["value", "amount", "advancePct"]);
 const UNSTABLE_UNITS = new Set(["roll", "than", "bale", "lot"]);
 const SLOT_ORDER = ["product", "quantity", "price", "delivery", "payment"];
@@ -179,17 +179,33 @@ export function parseIndicNumbers(text) {
   return out;
 }
 
+// True when the speaker said this number, as digits or as number words.
+// shortcut: Hindi and Gujarati number words from 21 to 99 (pachchees, tetalis) are not in the word table, so a value spoken that way
+// is dropped and the slot is asked again. Add the table if that shows up in real recordings.
+export function numberSaid(value, transcript) {
+  return parseIndicNumbers(transcript).some((n) => Math.abs(n - value) < 1e-6);
+}
+
 // Drops numbers the LLM produced that the speaker never said.
 export function numberGuard(terms, transcript) {
-  const found = parseIndicNumbers(transcript);
-  const said = (v) => found.some((n) => Math.abs(n - v) < 1e-6);
   const safe = structuredClone(terms ?? {});
   for (const [slot, fields] of Object.entries(FIELDS)) {
     for (const f of fields) {
-      if (NUMERIC_FIELDS.has(f) && safe[slot]?.[f] != null && !said(safe[slot][f])) safe[slot][f] = null;
+      if (NUMERIC_FIELDS.has(f) && safe[slot]?.[f] != null && !numberSaid(safe[slot][f], transcript)) safe[slot][f] = null;
     }
   }
   return safe;
+}
+
+// Lists the slot fields that the guard removed, so the caller can say so instead of staying silent.
+export function droppedByGuard(raw, safe) {
+  const out = [];
+  for (const [slot, fields] of Object.entries(FIELDS)) {
+    for (const f of fields) {
+      if (NUMERIC_FIELDS.has(f) && raw?.[slot]?.[f] != null && safe[slot]?.[f] == null) out.push({ slot, field: f });
+    }
+  }
+  return out;
 }
 
 // ---- Formatting ----
@@ -198,6 +214,7 @@ const unitName = (tt, unit) => tt.units[unit] ?? unit;
 const perName = (tt, unit) => tt.perUnits?.[unit] ?? unitName(tt, unit);
 
 export function formatDate(iso, lang) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(String(iso))) return String(iso ?? "");
   const [y, m, d] = iso.split("-").map(Number);
   return `${d} ${monthName(lang, m - 1)} ${y}`;
 }
@@ -260,7 +277,7 @@ const CHANGE_WORDS = /\b(change[ds]?|revise[ds]?|new price|instead|badal\w*)\b|à
 
 const isoDay = (d) => d.toISOString().slice(0, 10);
 
-function validDate(s, today) {
+export function validDate(s, today) {
   if (typeof s !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && isoDay(d) === s && s >= today && d - new Date(`${today}T00:00:00Z`) <= 400 * 864e5;

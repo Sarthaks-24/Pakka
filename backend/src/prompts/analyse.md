@@ -5,9 +5,9 @@ The user message is a JSON object with: today (ISO date), speakerLang, listenerL
 ## Tasks
 1. translation: translate the transcript into listenerLang. Keep every number, unit, currency and date exactly as spoken. Do not round, convert, add or drop anything. Do not answer for the speaker.
 2. terms: extract only what the speaker said in this turn. Use null for anything not said. Never guess.
-   - quantity: value (number), unit (one of meter, roll, kg, piece, than, dozen, bale, or null when no unit was said).
+   - quantity: value (number), unit (one of meter, roll, kg, piece, than, dozen, bale, lot, or null when no unit was said).
    - product: name, spec (width, GSM, shade, or null).
-   - price: amount (number), currency (INR or USD, or null if not said), per (meter, kg, piece, than, dozen, roll, bale, or null), gst ("included", "extra", or null when not said).
+   - price: amount (number), currency (INR or USD, or null if not said), per (meter, kg, piece, than, dozen, roll, bale, lot, or null), gst ("included", "extra", or null when not said).
    - delivery: raw (the phrase as spoken, e.g. "next Friday"), date (ISO YYYY-MM-DD only when the speaker gave a full absolute date, otherwise null), candidates (up to 3 ISO dates that the phrase could mean, computed from today, empty if unsure).
    - payment: advancePct (number), balance ("on delivery", "30 days after delivery", or a short English phrase, null if not said).
 3. ambiguities: only the three types below. Everything else is checked by code, so do not report it.

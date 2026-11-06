@@ -13,7 +13,19 @@ export function readConfig(env = process.env) {
     sellerVoice: env.SELLER_VOICE || "Shivani",
     buyerVoice: env.BUYER_VOICE || "Avinash",
     frontendOrigin: env.FRONTEND_ORIGIN || "http://localhost:5173",
+    frontendOrigins: allowedOrigins(env.FRONTEND_ORIGIN || "http://localhost:5173"),
   };
+}
+
+// FRONTEND_ORIGIN may be a comma-separated list. A localhost origin also allows its 127.0.0.1 form, and the other way round.
+function allowedOrigins(value) {
+  const out = new Set();
+  for (const origin of value.split(",").map((o) => o.trim().replace(/\/$/, "")).filter(Boolean)) {
+    out.add(origin);
+    if (origin.includes("//localhost")) out.add(origin.replace("//localhost", "//127.0.0.1"));
+    if (origin.includes("//127.0.0.1")) out.add(origin.replace("//127.0.0.1", "//localhost"));
+  }
+  return [...out];
 }
 
 export function missingEnv(env = process.env) {

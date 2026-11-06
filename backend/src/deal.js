@@ -1,6 +1,6 @@
 // Turn orchestration: analyse, gate on ambiguities, ask one question at a time, release, confirm.
 import {
-  applyTerms, applyOption, checkTerms, numberGuard, sortAmbiguities,
+  applyTerms, applyOption, checkTerms, numberGuard, numberSaid, droppedByGuard, validDate, NUMERIC_FIELDS, sortAmbiguities,
   confirmedLine, readiness, cardText, cardTerms,
 } from "./ledger.js";
 import { t, label, sameLabel, question, shortLang } from "./templates.js";
@@ -19,7 +19,17 @@ export function todayIST() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 }
 
-function fromLlm(a, ledger) {
+// A model-provided patch is applied only if its numbers were said (or already in the ledger) and its dates are real.
+function validPatch(patch, ledger, slot, { transcript, today }) {
+  return Object.entries(patch).every(([field, value]) => {
+    if (value === ledger[slot][field]) return true;
+    if (NUMERIC_FIELDS.has(field)) return numberSaid(value, transcript);
+    if (field === "date") return validDate(value, today);
+    return true;
+  });
+}
+
+function fromLlm(a, ledger, check) {
   const slot = ledger[a.slot];
   if (slot.status === "unresolved" || slot.acks.includes(a.type)) return null;
   let options;
@@ -27,7 +37,9 @@ function fromLlm(a, ledger) {
     options = ["INR", "USD"].map((c) => ({ id: c, label: label((l) => t(l).currency[c]), patch: { currency: c } }));
   } else {
     if (a.type === "A7" && a.slot !== "product") return null;
-    options = a.options.map((o, i) => ({ id: `o${i}`, label: sameLabel(o.label), patch: o.patch }));
+    options = a.options
+      .filter((o) => validPatch(o.patch, ledger, a.slot, check))
+      .map((o, i) => ({ id: `o${i}`, label: sameLabel(o.label), patch: o.patch }));
     if (options.length < 2) return null;
   }
   return { id: `${a.type}:${a.slot}`, type: a.type, slot: a.slot, quote: a.quote, options };
@@ -38,16 +50,37 @@ export async function detectAmbiguities({ transcript, speakerLang, listenerLang,
   const terms = numberGuard(raw.terms, transcript);
   const next = applyTerms(ledger, terms);
   const rules = checkTerms(terms, ledger, { transcript, today });
-  const llmFound = (raw.ambiguities ?? []).map((a) => fromLlm(a, next)).filter(Boolean);
+  const dropped = droppedByGuard(raw.terms, terms);
+  const skip = new Set(dropped.map((d) => d.slot));
+  const llmFound = (raw.ambiguities ?? []).map((a) => fromLlm(a, next, { transcript, today })).filter(Boolean);
   const bySlot = new Map();
-  // Rules come first so their options win when both flag the same slot.
+  const deferred = [];
+  // Rules come first so their options win when both flag the same slot. The others wait until that slot's question is answered.
   for (const a of sortAmbiguities(rules).concat(sortAmbiguities(llmFound))) {
+    if (skip.has(a.slot)) continue;
     if (!bySlot.has(a.slot)) bySlot.set(a.slot, a);
+    else deferred.push(a);
   }
-  return { translation: raw.translation, terms, ambiguities: sortAmbiguities([...bySlot.values()]) };
+  return { translation: raw.translation, terms, dropped, deferred, ambiguities: sortAmbiguities([...bySlot.values()]) };
 }
 
-const hasValue = (slot) => Object.entries(slot).some(([k, v]) => !["status", "rounds", "acks"].includes(k) && v != null);
+// Moves deferred questions into the queue once nothing else is asked about their slot.
+function promoteDeferred(queue, deferred, ledger) {
+  const out = [...queue];
+  const waiting = [];
+  for (const a of deferred) {
+    const slot = ledger[a.slot];
+    if (slot.status === "unresolved" || slot.acks.includes(a.type)) continue;
+    if (out.some((q) => q.slot === a.slot)) waiting.push(a);
+    else out.push(a);
+  }
+  return { queue: sortAmbiguities(out), deferred: waiting };
+}
+
+const hasNewTerms = (turn) =>
+  Object.values(turn.terms ?? {}).some((fields) => Object.values(fields ?? {}).some((v) => v != null && !(Array.isArray(v) && !v.length)));
+
+const hasValue =(slot) => Object.entries(slot).some(([k, v]) => !["status", "rounds", "acks"].includes(k) && v != null);
 
 function setStatuses(ledger, queue, resolved) {
   for (const slot of resolved) {
@@ -57,12 +90,12 @@ function setStatuses(ledger, queue, resolved) {
 }
 
 // Saves the new state on the document (the route persists it) and speaks either the next question or the released text.
-async function conclude({ session, cfg, providers, ledger, queue, resolved, turnIndex, speaker, turn }) {
+async function conclude({ session, cfg, providers, ledger, queue, resolved, turnIndex, speaker, turn, followUps = [], deferred = [], dropped = [] }) {
   session.ledger = ledger;
   const original = session.turns[turnIndex];
   let extra;
   if (queue.length) {
-    session.pending = { turnIndex, speaker, queue, resolved };
+    session.pending = { turnIndex, speaker, queue, resolved, followUps, deferred };
     const a = queue[0];
     const lang = langOf(cfg, speaker);
     const text = question(a.type, lang);
@@ -83,14 +116,26 @@ async function conclude({ session, cfg, providers, ledger, queue, resolved, turn
     session.pending = null;
     const lang = langOf(cfg, other(original.speaker));
     const done = [...new Set(resolved)];
-    const text = done.length ? `${original.translation}\n${confirmedLine(ledger, done, lang)}` : original.translation;
+    // A re-answer that added terms is spoken together with the original. One without new terms is released as its own text.
+    const followed = followUps.map((i) => session.turns[i]).filter(Boolean);
+    const withTerms = followed.filter(hasNewTerms);
+    const body = [original, ...withTerms].map((x) => x.translation).join("\n");
+    const text = done.length ? `${body}\n${confirmedLine(ledger, done, lang)}` : body;
     const audio = await providers.tts(text, lang, voiceOf(cfg, other(original.speaker)));
-    original.status = "released";
-    original.releasedText = text;
-    original.audioHash = audio.hash;
+    for (const x of [original, ...withTerms]) {
+      x.status = "released";
+      x.releasedText = text;
+      x.audioHash = audio.hash;
+    }
+    for (const x of followed) {
+      if (x.status === "released") continue;
+      x.status = "released";
+      x.releasedText = x.translation;
+    }
     original.latency.ttsMs = (original.latency.ttsMs ?? 0) + audio.ms;
     extra = { outcome: "released", release: { text, lang, audioUrl: audioUrl(audio.hash) } };
   }
+  if (dropped.length) extra.dropped = dropped;
   const json = session.toJSON();
   return { session: json, turn: json.turns[session.turns.indexOf(turn)], ...extra };
 }
@@ -138,7 +183,14 @@ export async function runTurn({ session, speaker, text, audio, providers, cfg, t
     for (const a of analysis.ambiguities) if (!pending.queue.some((o) => o.slot === a.slot)) queue.push(a);
     queue = sortAmbiguities(queue);
   }
+  const dropped = analysis.dropped;
+  const dropSlots = new Set(dropped.map((d) => d.slot));
+  queue = queue.filter((a) => !dropSlots.has(a.slot));
+  const promoted = promoteDeferred(queue, [...(pending?.deferred ?? []), ...analysis.deferred], ledger);
+  queue = promoted.queue;
   setStatuses(ledger, queue, resolved);
+  // A value the guard removed is not silent: the slot is flagged and the response lists it, so the speaker is asked to say it again.
+  for (const slot of dropSlots) ledger[slot].status = "unresolved";
 
   session.turns.push({
     speaker, lang, source: audio ? "voice" : "text", transcript, translation: analysis.translation,
@@ -147,8 +199,9 @@ export async function runTurn({ session, speaker, text, audio, providers, cfg, t
   });
   const turnIndex = session.turns.length - 1;
   return conclude({
-    session, cfg, providers, ledger, queue, resolved, speaker,
+    session, cfg, providers, ledger, queue, resolved, speaker, dropped,
     turnIndex: pending ? pending.turnIndex : turnIndex, turn: session.turns[turnIndex],
+    followUps: pending ? [...(pending.followUps ?? []), turnIndex] : [], deferred: promoted.deferred,
   });
 }
 
@@ -159,6 +212,8 @@ export async function answerClarification({ session, optionId, skip, providers, 
   let ledger = structuredClone(session.ledger);
   const resolved = [...pending.resolved];
   if (skip) {
+    // A changed price that was never confirmed must not stay in the ledger: go back to the agreed amount.
+    if (current.type === "A8") Object.assign(ledger[current.slot], current.options.find((o) => o.id === "old")?.patch);
     ledger[current.slot].status = "unresolved";
   } else {
     if (!current.options.some((o) => o.id === optionId)) {
@@ -170,18 +225,23 @@ export async function answerClarification({ session, optionId, skip, providers, 
   // Answering one slot can expose the next gap, for example price basis after GST.
   const known = new Set(rest.map((a) => a.slot));
   const found = checkTerms({}, ledger, { today }).filter((a) => !known.has(a.slot));
-  const queue = sortAmbiguities([...rest, ...found]);
+  const promoted = promoteDeferred(sortAmbiguities([...rest, ...found]), pending.deferred ?? [], ledger);
+  const queue = promoted.queue;
   setStatuses(ledger, queue, resolved);
   return conclude({
     session, cfg, providers, ledger, queue, resolved, speaker: pending.speaker,
     turnIndex: pending.turnIndex, turn: session.turns[pending.turnIndex],
+    followUps: pending.followUps ?? [], deferred: promoted.deferred,
   });
 }
 
 export async function confirmDeal({ session, providers, cfg }) {
   if (session.status === "confirmed") return { session: session.toJSON(), card: session.card };
   const { ready, missing } = readiness(session.ledger);
-  if (!ready || session.pending) {
+  if (session.pending) {
+    throw new HttpError(409, "A question is still open. Answer it or skip it, then confirm.", { missing });
+  }
+  if (!ready) {
     throw new HttpError(409, `Cannot confirm yet. These terms are not settled: ${missing.join(", ")}. Answer the open question or say them again.`, { missing });
   }
   const card = { terms: cardTerms(session.ledger), text: {}, audioUrl: {}, confirmedAt: new Date().toISOString() };

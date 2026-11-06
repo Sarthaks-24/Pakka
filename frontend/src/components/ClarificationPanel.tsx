@@ -16,21 +16,23 @@ interface Props {
 
 export default function ClarificationPanel({ clarification: c, speaker, busy, error, audioUrl, play, onAnswer }: Props) {
   const ref = useRef<HTMLElement>(null)
-  useEffect(() => ref.current?.focus(), [c.ambiguityId])
+  useEffect(() => ref.current?.focus(), [c])
   const who = SPEAKERS[speaker]
 
   return (
     <section
       ref={ref}
       tabIndex={-1}
+      role="group"
       aria-labelledby="clarify-title"
+      aria-describedby="clarify-question"
       className="rounded-panel border-2 border-accent bg-accent-soft p-6 sm:p-8"
     >
       <h2 id="clarify-title" className="text-lg text-muted">
         Held until {who.title.toLowerCase()} answers: {SLOT_LABEL[c.slot].toLowerCase()}
       </h2>
-      <div aria-live="polite">
-        <p lang={shortLang(c.question.lang)} className="mt-3 max-w-prose font-display text-2xl sm:text-3xl">
+      <div>
+        <p id="clarify-question" lang={shortLang(c.question.lang)} className="mt-3 max-w-prose font-display text-2xl sm:text-3xl">
           {c.question.text}
         </p>
         {c.quote && (
