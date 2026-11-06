@@ -1,0 +1,21 @@
+# Planning material and research, never pushed
+cache/
+plan.md
+TEAMMATE_BRIEF.md
+Executive Summary.pdf
+.arena/
+CLAUDE.md
+graphify-out/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Build and runtime
+node_modules/
+dist/
+coverage/
+backend/.cache/
+.claude/
+*.log
