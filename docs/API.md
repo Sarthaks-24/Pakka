@@ -141,7 +141,7 @@ The `ambiguityId` is `<type>:<slot>`, for example `A3:delivery`.
 {
   "terms": {
     "quantity": { "value": 500, "unit": "meter" },
-    "product": { "name": "cotton", "spec": null },
+    "product": { "name": "કોટન કાપડ", "spec": null, "nameTranslated": "कॉटन कपड़ा", "nameLang": "gu-IN" },
     "price": { "amount": 118, "currency": "INR", "per": "meter", "gst": "extra" },
     "delivery": { "date": "2026-11-13", "raw": "next Friday" },
     "payment": { "advancePct": 30, "balance": "on delivery" }
@@ -157,6 +157,8 @@ The `ambiguityId` is `<type>:<slot>`, for example `A3:delivery`.
   "confirmedAt": "2026-11-06T09:45:12.000Z"
 }
 ```
+
+`product.nameTranslated` is the product name in the other side's language, from Gemini. Each side of the card uses the name in its own language; `nameLang` is the language the name was said in.
 
 Example values are synthetic.
 

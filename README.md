@@ -10,7 +10,10 @@ Small traders and buyers who do not share a language, for example a Surat textil
 
 ## Live links
 
-Not deployed yet. Pakka runs locally only. See `docs/OPERATIONS.md` for free hosting options that are not set up.
+- Demo video (2:55): https://drive.google.com/file/d/1ocv-P22pBG6EIxKJ3J3gmyWJevlCDhho/view
+- One-page pitch: `docs/PITCH.md`
+
+The app is not deployed yet. Pakka runs locally only. See `docs/OPERATIONS.md` for free hosting options that are not set up.
 
 ## What is Gnani and what is not
 

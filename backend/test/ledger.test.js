@@ -139,4 +139,11 @@ describe("applyOption and formatting", () => {
     expect(formatSlot("delivery", { date: "2026-11-13" }, "en-IN")).toBe("13 November 2026");
     expect(formatSlot("price", fullTerms.price, "en-IN")).toBe("118 rupees per meter, GST extra");
   });
+
+  it("shows the product name in the reader's language when a translation is stored", () => {
+    const product = { name: "કોટન કાપડ", nameTranslated: "सूती कपड़ा", nameLang: "gu-IN", spec: null };
+    expect(formatSlot("product", product, "hi-IN")).toBe("सूती कपड़ा");
+    expect(formatSlot("product", product, "gu-IN")).toBe("કોટન કાપડ");
+    expect(formatSlot("product", { name: "cotton" }, "hi-IN")).toBe("cotton");
+  });
 });

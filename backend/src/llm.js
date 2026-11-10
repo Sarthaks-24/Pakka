@@ -26,7 +26,7 @@ const RESPONSE_SCHEMA = {
       type: "OBJECT",
       properties: {
         quantity: obj({ value: num, unit: str() }),
-        product: obj({ name: str(), spec: str() }),
+        product: obj({ name: str(), spec: str(), nameTranslated: str() }),
         price: obj({ amount: num, currency: str(), per: str(), gst: str() }),
         delivery: obj({ raw: str(), date: str(), candidates: { type: "ARRAY", items: { type: "STRING" } } }),
         payment: obj({ advancePct: num, balance: str() }),

@@ -48,6 +48,7 @@ function fromLlm(a, ledger, check) {
 export async function detectAmbiguities({ transcript, speakerLang, listenerLang, ledger, today, llm }) {
   const raw = await llm.analyseTurn({ transcript, speakerLang, listenerLang, ledger, today });
   const terms = numberGuard(raw.terms, transcript);
+  if (terms.product?.name) terms.product = { ...terms.product, nameLang: speakerLang };
   const next = applyTerms(ledger, terms);
   const rules = checkTerms(terms, ledger, { transcript, today });
   const dropped = droppedByGuard(raw.terms, terms);

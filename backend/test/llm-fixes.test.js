@@ -34,6 +34,18 @@ describe("units", () => {
   });
 });
 
+describe("product name translation", () => {
+  it("keeps the translated product name from the model", () => {
+    const out = sanitizeAnalysis({ translation: "x", terms: { product: { name: "કોટન કાપડ", nameTranslated: "सूती कपड़ा" } }, ambiguities: [] }, today);
+    expect(out.terms.product).toEqual({ name: "કોટન કાપડ", nameTranslated: "सूती कपड़ा" });
+  });
+  it("records the speaker's language next to the product name", async () => {
+    const llm = { analyseTurn: async () => ({ translation: "x", terms: { product: { name: "કોટન કાપડ", nameTranslated: "सूती कपड़ा" } }, ambiguities: [] }) };
+    const res = await detectAmbiguities({ transcript: "કોટન કાપડ", speakerLang: "gu-IN", listenerLang: "hi-IN", ledger: emptyLedger(), today, llm });
+    expect(res.terms.product).toEqual({ name: "કોટન કાપડ", nameTranslated: "सूती कपड़ा", nameLang: "gu-IN" });
+  });
+});
+
 describe("LLM option patches", () => {
   const llm = (ambiguities, terms = {}) => ({ analyseTurn: async () => ({ translation: "x", terms, ambiguities }) });
   const run = (transcript, ambiguities, terms) =>

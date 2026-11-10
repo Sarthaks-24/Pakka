@@ -3,7 +3,8 @@ import { t, monthName, label } from "./templates.js";
 
 export const FIELDS = {
   quantity: ["value", "unit"],
-  product: ["name", "spec"],
+  // nameTranslated is the name in the listener's language; nameLang is the language the name was said in.
+  product: ["name", "spec", "nameTranslated", "nameLang"],
   price: ["amount", "currency", "per", "gst"],
   delivery: ["date", "raw"],
   payment: ["advancePct", "balance"],
@@ -225,8 +226,10 @@ export function formatSlot(slot, value, lang) {
   switch (slot) {
     case "quantity":
       return [v.value, v.unit && unitName(tt, v.unit)].filter((x) => x != null).join(" ");
-    case "product":
-      return v.spec ? `${v.name} (${v.spec})` : (v.name ?? "");
+    case "product": {
+      const name = v.nameTranslated && v.nameLang && v.nameLang.slice(0, 2) !== String(lang).slice(0, 2) ? v.nameTranslated : v.name;
+      return v.spec ? `${name} (${v.spec})` : (name ?? "");
+    }
     case "price": {
       const parts = [];
       if (v.amount != null) parts.push(`${v.amount} ${tt.currency[v.currency ?? "INR"]}`);
