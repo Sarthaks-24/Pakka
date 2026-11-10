@@ -13,7 +13,8 @@ Copy with `cd backend; copy .env.example .env` (PowerShell).
 | `MONGODB_URI` | MongoDB connection string for sessions | Yes | none (the example file has `mongodb://127.0.0.1:27017/pakka`) | Local MongoDB, or a MongoDB Atlas free M0 cluster |
 | `GNANI_API_KEY` | Key for Gnani Prisma STT and Timbre TTS, sent as `X-API-Key-ID` | Yes | none | app.gnani.ai/voice |
 | `GEMINI_API_KEY` | Key for Gemini translation and ambiguity analysis | Yes | none | aistudio.google.com |
-| `GEMINI_MODEL` | Gemini model name used in the request URL | No | `gemini-2.5-flash` | Model list in Google AI Studio. Change it if the model is retired (the API then answers "The model in GEMINI_MODEL was not found") |
+| `GEMINI_MODEL` | Gemini model name used in the request URL | No | `gemini-3.6-flash` | Model list in Google AI Studio. Change it if the model is retired (the API then answers "The model in GEMINI_MODEL was not found") |
+| `GEMINI_THINKING_LEVEL` | Gemini thinking level: `minimal`, `low`, `medium` or `high`. Empty uses the model default. Any other value stops the server at start-up | No | empty | `minimal` measured about 3 s per turn on `gemini-3.6-flash`, against 13 s or more at the default (10 Nov 2026). Some models reject some levels with a 400 |
 | `PORT` | Port the API listens on | No | `4000` | Any free port. Update `VITE_API_URL` to match |
 | `FRONTEND_ORIGIN` | Browser origin allowed by CORS. A comma-separated list is accepted. A `localhost` origin also allows its `127.0.0.1` form | No | `http://localhost:5173` | The address the frontend is served from |
 | `SELLER_LANG` | Seller's language code for STT, TTS and templates | No | `gu-IN` | Gnani language codes. Templates exist for gu, hi and en only |

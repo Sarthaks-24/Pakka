@@ -8,6 +8,10 @@ const SYSTEM_PROMPT = readFileSync(new URL("./prompts/analyse.md", import.meta.u
 const UNITS = new Set(CANON_UNITS);
 const ENUMS = { unit: UNITS, per: UNITS, currency: new Set(["INR", "USD"]), gst: new Set(["included", "extra"]) };
 const TIMEOUT_MS = 20000;
+// A busy model (500, 503) or a timeout is retried, so one Gemini hiccup does not fail the turn.
+const ATTEMPTS = 3;
+const RETRY_DELAY_MS = process.env.NODE_ENV === "test" || process.env.VITEST ? 0 : 1000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const LLM_TYPES =new Set(["A7", "A9", "A10"]);
 
 const str = (nullable = true) => ({ type: "STRING", nullable });
@@ -102,23 +106,33 @@ const brief = (ledger) =>
     [slot, { status: ledger[slot].status, ...Object.fromEntries(fields.map((f) => [f, ledger[slot][f]])) }]));
 
 export async function analyseTurn({ transcript, speakerLang, listenerLang, ledger, today }) {
-  const { geminiKey, geminiModel } = readConfig();
+  const { geminiKey, geminiModel, geminiThinkingLevel } = readConfig();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: "user", parts: [{ text: JSON.stringify({ today, speakerLang, listenerLang, ledger: brief(ledger), transcript }) }] }],
+    generationConfig: {
+      responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0,
+      ...(geminiThinkingLevel && { thinkingConfig: { thinkingLevel: geminiThinkingLevel } }),
+    },
+  });
   let res;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: "user", parts: [{ text: JSON.stringify({ today, speakerLang, listenerLang, ledger: brief(ledger), transcript }) }] }],
-        generationConfig: { responseMimeType: "application/json", responseSchema: RESPONSE_SCHEMA, temperature: 0 },
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (err) {
-    if (err?.name === "TimeoutError") throw new HttpError(504, "Gemini took too long to answer. Try the turn again.");
-    throw new HttpError(502, "Could not reach Gemini. Check the internet connection and try again.");
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    if (attempt > 1) await sleep(RETRY_DELAY_MS * (attempt - 1));
+    const last = attempt === ATTEMPTS;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (err) {
+      if (err?.name !== "TimeoutError") throw new HttpError(502, "Could not reach Gemini. Check the internet connection and try again.");
+      if (last) throw new HttpError(504, "Gemini took too long to answer. Try the turn again.");
+      continue;
+    }
+    if ((res.status !== 500 && res.status !== 503) || last) break;
   }
   if (res.status === 401 || res.status === 403) {
     throw new HttpError(502, "Gemini rejected the API key. Check GEMINI_API_KEY in backend/.env.");

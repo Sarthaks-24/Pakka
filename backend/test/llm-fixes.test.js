@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { sanitizeAnalysis, analyseTurn } from "../src/llm.js";
 import { UNITS, emptyLedger, formatDate } from "../src/ledger.js";
 import { detectAmbiguities } from "../src/deal.js";
+import { configError } from "../src/config.js";
 
 const today = "2026-11-06";
 
@@ -79,5 +80,44 @@ describe("gemini errors", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(call()).rejects.toThrow(/took too long/);
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+  it("retries a busy model and succeeds on a later attempt", async () => {
+    const ok = { candidates: [{ content: { parts: [{ text: JSON.stringify({ translation: "y", terms: {}, ambiguities: [] }) }] } }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(ok), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await call()).translation).toBe("y");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it("gives up after three busy answers", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(call()).rejects.toThrow(/did not answer/);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it("sends GEMINI_THINKING_LEVEL only when it is set", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await call().catch(() => {});
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).generationConfig.thinkingConfig).toBeUndefined();
+    vi.stubEnv("GEMINI_THINKING_LEVEL", "minimal");
+    await call().catch(() => {});
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
+    vi.unstubAllEnvs();
+  });
+  it("start-up rejects an unknown thinking level", () => {
+    const base = { MONGODB_URI: "mongodb://x", GNANI_API_KEY: "fake", GEMINI_API_KEY: "fake" };
+    expect(configError({ ...base, GEMINI_THINKING_LEVEL: "fast" })).toMatch(/GEMINI_THINKING_LEVEL/);
+    expect(configError({ ...base, GEMINI_THINKING_LEVEL: "low" })).toBeNull();
+    expect(configError(base)).toBeNull();
+    expect(configError({})).toMatch(/MONGODB_URI/);
+  });
+  it("does not retry a key error", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(call()).rejects.toThrow(/GEMINI_API_KEY/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

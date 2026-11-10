@@ -7,7 +7,8 @@ export function readConfig(env = process.env) {
     gnaniKey: env.GNANI_API_KEY,
     geminiKey: env.GEMINI_API_KEY,
     port: Number(env.PORT) || 4000,
-    geminiModel: env.GEMINI_MODEL || "gemini-2.5-flash",
+    geminiModel: env.GEMINI_MODEL || "gemini-3.6-flash",
+    geminiThinkingLevel: env.GEMINI_THINKING_LEVEL || null,
     sellerLang: env.SELLER_LANG || "gu-IN",
     buyerLang: env.BUYER_LANG || "hi-IN",
     sellerVoice: env.SELLER_VOICE || "Shivani",
@@ -32,11 +33,23 @@ export function missingEnv(env = process.env) {
   return REQUIRED.filter((name) => !env[name]);
 }
 
-// Exits at start-up naming the variable. Values are never printed.
-export function loadConfig(env = process.env) {
+const THINKING_LEVELS = ["minimal", "low", "medium", "high"];
+
+// Returns a start-up error message, or null when the environment is usable. Values are never included.
+export function configError(env = process.env) {
   const missing = missingEnv(env);
-  if (missing.length) {
-    console.error(`Missing required environment variable: ${missing.join(", ")}. Set it in backend/.env (see backend/.env.example).`);
+  if (missing.length) return `Missing required environment variable: ${missing.join(", ")}. Set it in backend/.env (see backend/.env.example).`;
+  if (env.GEMINI_THINKING_LEVEL && !THINKING_LEVELS.includes(env.GEMINI_THINKING_LEVEL)) {
+    return `GEMINI_THINKING_LEVEL must be one of ${THINKING_LEVELS.join(", ")}, or left empty.`;
+  }
+  return null;
+}
+
+// Exits at start-up naming the variable.
+export function loadConfig(env = process.env) {
+  const error = configError(env);
+  if (error) {
+    console.error(error);
     process.exit(1);
   }
   return readConfig(env);

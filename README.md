@@ -129,7 +129,7 @@ Of the 30 dialogues, 10 are clean (expected no flags). The scorer counts a type 
 - Numbers are passed to TTS as digits. Timbre may read numbers better as words.
 - Single laptop, push-to-talk only. No two devices, no streaming, no telephony.
 - The number-word parser covers 1 to 20, the tens (30 to 90), hundred, thousand, lakh, crore, and the fraction words dedh, dhai, sava, paune and saade. It does not cover every compound such as 21 to 29 spoken as one word.
-- The Gemini model name `gemini-2.5-flash` is an assumption. If Google has retired it, set `GEMINI_MODEL`.
+- Gemini is sometimes overloaded (503) or slow. The backend retries a 500, 503 or timeout up to 3 attempts, which can make one turn take up to a minute. Set `GEMINI_THINKING_LEVEL=minimal` for about 3 s turns.
 - The 25 second recording cap is enforced in the browser. The server only limits the upload to 2 MB.
 - Timbre voices `Shivani` and `Avinash` have not been checked by ear.
 - No live smoke test with real keys has been run yet.
