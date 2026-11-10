@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.1, 10 Nov 2026
+
+First live run with real Gnani and Gemini keys.
+
+### Changed
+
+- Gemini calls that answer 500 or 503, or time out, are retried up to 3 attempts with a short pause. The free tier often answers "model experiencing high demand".
+- New optional variable `GEMINI_THINKING_LEVEL` (`minimal`, `low`, `medium` or `high`). `minimal` measured about 3 s per turn on `gemini-3.6-flash` against 13 s or more at the model default. An unknown value stops the server at start-up.
+- Default `GEMINI_MODEL` is now `gemini-3.6-flash`. `gemini-2.5-flash` answered 404 on 10 Nov 2026.
+- Added `docs/PITCH.md`, a one-page solution pitch.
+
+### Verified live
+
+- Gnani Prisma transcribed a Gujarati clip in 4.1 s and a Hindi clip in 1.7 s, close to word for word.
+- A full deal ran end to end: Gujarati seller, 4 held questions, Hindi release with Timbre audio, a Hindi counter-offer caught as a changed price, and a confirmed card in both languages.
+
+### Known limits
+
+- The Gemini free tier allows 5 requests a minute and 20 a day per model. The 30-dialogue eval needs more than 20 calls, so precision and recall are still not measured.
+- `gemini-3.5-flash-lite` at `minimal` sometimes returns no terms for a sentence without commas. Use a full Flash model for demos.
+- The product name on the Hindi card stays in the seller's words (for example Gujarati script).
+
 ## 0.1.0, 6 Nov 2026
 
 First working version of Pakka, built for the Great Indian AI Internship Challenge.

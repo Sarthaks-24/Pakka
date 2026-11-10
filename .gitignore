@@ -4,7 +4,6 @@ plan.md
 TEAMMATE_BRIEF.md
 Executive Summary.pdf
 .arena/
-CLAUDE.md
 graphify-out/
 
 # Secrets
@@ -17,5 +16,4 @@ node_modules/
 dist/
 coverage/
 backend/.cache/
-.claude/
 *.log
